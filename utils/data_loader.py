@@ -88,7 +88,7 @@ def collate_fn(data):
             targets[i, j, :len(sentence)] = sentence[:]
             prob[i][j] = len(sentence) > 0
 
-    targets = torch.Tensor(targets).float()
+    targets = torch.Tensor(targets).long()
     prob = torch.Tensor(prob)
 
     return images, image_id, targets, prob

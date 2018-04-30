@@ -40,6 +40,7 @@ class Im2pGenerator(object):
     def train(self):
         for epoch in range(self.args.epochs):
             train_loss = self.__epoch_train()
+            break
             # val_loss = self.__epoch_val()
             # self.scheduler.step(val_loss)
             # print("[{}] Epoch-{} - train loss:{} - val loss:{}".format(self.__get_now(),
@@ -63,18 +64,38 @@ class Im2pGenerator(object):
             sentence_states = None
 
             p_pred = torch.zeros(p_real.shape)
-            captions_pred = torch.zeros(captions.shape)
+            captions_pred = torch.zeros((captions.shape[0], captions.shape[1], captions.shape[2], len(self.vocab)))
 
             for sentence_index in range(captions.shape[1]):
                 p, topic_vec, sentence_states = self.sentenceRNN.forward(pooled_vectors, sentence_states)
-                p_pred[:, sentence_index] = p.data
+                p_pred[:, sentence_index] = p.view(-1, )
 
                 for word_index in range(1, captions.shape[2]):
                     words_pred = self.wordRNN.forward(topic_vec=topic_vec,
                                                       captions=captions[:, sentence_index, :word_index])
-                    captions_pred[:, sentence_index, word_index] = words_pred.data
-            print(p_pred)
-            print(captions_pred)
+                    print(words_pred)
+                    captions_pred[:, sentence_index, word_index, :] = words_pred
+            captions_mask = captions > 0
+            captions_mask = captions_mask.cuda().view(captions_mask.shape[0], captions_mask.shape[1], captions_mask.shape[2], 1).float()
+
+            captions_ = torch.unsqueeze(captions, 3)
+            captions_onehot = torch.FloatTensor(captions.shape[0], captions.shape[1], captions.shape[2], len(self.vocab)).cuda().zero_()
+            captions_onehot.scatter_(3, captions_, 1)
+
+            captions_pred = captions_pred.cuda()
+
+            captions_pred = captions_pred * captions_mask
+            print(captions_pred.shape)
+            print(captions_onehot.shape)
+
+            p_pred = p_pred.cuda()
+            p_real = p_real.cuda()
+
+            loss = 5 * self.criterion(p_pred, p_real) + 10 * self.criterion(captions_pred, captions_onehot)
+            print(self.criterion(captions_pred, captions_onehot))
+
+            loss.backward()
+            self.optimizer.step()
             break
 
         return train_loss
@@ -176,7 +197,7 @@ class Im2pGenerator(object):
             self.min_loss = loss
 
     def __init_criterion(self):
-        return nn.CrossEntropyLoss()
+        return nn.BCELoss()
 
     def __init_optimizer(self):
         params = list(self.encoderCNN.parameters()) \

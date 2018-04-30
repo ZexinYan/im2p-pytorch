@@ -118,10 +118,10 @@ class WordRNN(nn.Module):
         :return:
         """
         embeddings = self.embed(captions)
-        embeddings = torch.cat((torch.unsqueeze(topic_vec, 1), embeddings), 1)
+        embeddings = torch.cat((topic_vec, embeddings), 1)
         hidden, _ = self.lstm(embeddings)
-        outputs = self.linear(hidden[0])
-        return outputs
+        outputs = nn.Softmax()(self.linear(hidden))
+        return outputs[:, -1]
 
     def sample(self, features, n_max, states=None):
         sampled_ids = np.zeros((np.shape(features)[0], self.n_max))
