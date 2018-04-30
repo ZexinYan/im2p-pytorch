@@ -9,7 +9,12 @@ from torchvision import transforms
 
 
 class DataSet(data.Dataset):
-    def __init__(self, image_dir, caption_json, data_json, vocabulary, transform=None):
+    def __init__(self,
+                 image_dir,
+                 caption_json,
+                 data_json,
+                 vocabulary,
+                 transform=None):
         """
 
         :param image_dir: the path of image folder.
@@ -41,6 +46,7 @@ class DataSet(data.Dataset):
             image = self.transform(image)
 
         target = list()
+        word_num = 0
         for sentence in paragraph.split('. '):
             sentence = sentence.lower().replace('.', '').replace(',', '').split()
             if len(sentence) == 0:
@@ -49,8 +55,11 @@ class DataSet(data.Dataset):
             tokens.append(self.vocabulary('<start>'))
             tokens.extend([self.vocabulary(token) for token in sentence])
             tokens.append(self.vocabulary('<end>'))
+            if word_num < len(tokens):
+                word_num = len(tokens)
             target.append(tokens)
-        return image, target, image_id
+        sentence_num = len(target)
+        return image, image_id, target, sentence_num, word_num
 
     def __len__(self):
         return len(self.data)
@@ -65,28 +74,33 @@ def collate_fn(data):
         lengths: (batch_size, s_max)
         image_id: (batch_size, )
     """
-    # s_max = 6
-    # n_max = 50
-    images, captions, image_id = zip(*data)
+    images, image_id, captions, sentences_num, words_num = zip(*data)
     images = torch.stack(images, 0)
 
-    # captions = list(captions)
-    # captions.sort(key=lambda x: len(x[1]), reverse=True)
-    # lengths = np.ones((len(image_id), s_max))
-    # targets = torch.zeros(len(image_id), s_max, n_max)
-    # for i in range(len(image_id)):
-    #     for j in range(s_max):
-    #         try:
-    #             lengths[i][j] = int(len(captions[i][j]))
-    #             end = int(lengths[i][j])
-    #             targets[i, j, :end] = torch.Tensor(captions[i][j][:end])
-    #         except Exception as err:
-    #             pass
+    max_sentence_num = max(sentences_num)
+    max_word_num = max(words_num)
 
-    return images, captions, image_id
+    targets = np.zeros((len(captions), max_sentence_num, max_word_num))
+    prob = np.zeros((len(captions), max_sentence_num))
+
+    for i, caption in enumerate(captions):
+        for j, sentence in enumerate(caption):
+            targets[i, j, :len(sentence)] = sentence[:]
+            prob[i][j] = len(sentence) > 0
+
+    targets = torch.Tensor(targets).float()
+    prob = torch.Tensor(prob)
+
+    return images, image_id, targets, prob
 
 
-def get_loader(image_dir, caption_json, data_json, vocabulary, transform, batch_size, shuffle):
+def get_loader(image_dir,
+               caption_json,
+               data_json,
+               vocabulary,
+               transform,
+               batch_size,
+               shuffle):
     dataset = DataSet(image_dir=image_dir,
                       caption_json=caption_json,
                       data_json=data_json,
@@ -126,8 +140,9 @@ if __name__ == '__main__':
                              transform=transform,
                              batch_size=batch_size,
                              shuffle=True)
-    for i, (images, captions, image_id) in enumerate(data_loader):
-        print("image:{}".format(images))
-        print("captions:{}".format(captions))
-        print("image id:{}".format(image_id))
+    for i, (images, images_id, target, prob) in enumerate(data_loader):
+        print("image:{}".format(images.shape))
+        print("images id:{}".format(images_id))
+        print("captions:{}".format(target))
+        print("image id:{}".format(prob))
         break
