@@ -12,8 +12,6 @@ from torchvision import transforms
 
 from utils.data_loader import get_loader, Vocabulary
 from utils.model import *
-
-
 # from utils.logger import Logger
 
 
@@ -40,14 +38,13 @@ class Im2pGenerator(object):
     def train(self):
         for epoch in range(self.args.epochs):
             train_loss = self.__epoch_train()
-            break
-            # val_loss = self.__epoch_val()
-            # self.scheduler.step(val_loss)
-            # print("[{}] Epoch-{} - train loss:{} - val loss:{}".format(self.__get_now(),
-            #                                                            epoch + 1,
-            #                                                            train_loss,
-            #                                                            val_loss))
-            # self.__save_model(val_loss, self.args.saved_model_name)
+            val_loss = self.__epoch_val()
+            self.scheduler.step(val_loss)
+            print("[{}] Epoch-{} - train loss:{} - val loss:{}".format(self.__get_now(),
+                                                                       epoch + 1,
+                                                                       train_loss,
+                                                                       val_loss))
+            self.__save_model(val_loss, self.args.saved_model_name)
             # self.__log(train_loss, val_loss, epoch + 1)
 
     def __epoch_train(self):
@@ -64,7 +61,10 @@ class Im2pGenerator(object):
             sentence_states = None
 
             p_pred = torch.zeros(p_real.shape)
-            captions_pred = torch.zeros((captions.shape[0], captions.shape[1], captions.shape[2], len(self.vocab)))
+            captions_pred = torch.zeros((captions.shape[0],
+                                         captions.shape[1],
+                                         captions.shape[2],
+                                         len(self.vocab)))
 
             for sentence_index in range(captions.shape[1]):
                 p, topic_vec, sentence_states = self.sentenceRNN.forward(pooled_vectors, sentence_states)
@@ -73,35 +73,87 @@ class Im2pGenerator(object):
                 for word_index in range(1, captions.shape[2]):
                     words_pred = self.wordRNN.forward(topic_vec=topic_vec,
                                                       captions=captions[:, sentence_index, :word_index])
-                    print(words_pred)
                     captions_pred[:, sentence_index, word_index, :] = words_pred
             captions_mask = captions > 0
-            captions_mask = captions_mask.cuda().view(captions_mask.shape[0], captions_mask.shape[1], captions_mask.shape[2], 1).float()
+            captions_mask = captions_mask.cuda().view(captions_mask.shape[0],
+                                                      captions_mask.shape[1],
+                                                      captions_mask.shape[2], 1).float()
 
             captions_ = torch.unsqueeze(captions, 3)
-            captions_onehot = torch.FloatTensor(captions.shape[0], captions.shape[1], captions.shape[2], len(self.vocab)).cuda().zero_()
+            captions_onehot = torch.FloatTensor(captions.shape[0],
+                                                captions.shape[1],
+                                                captions.shape[2],
+                                                len(self.vocab)).cuda().zero_()
             captions_onehot.scatter_(3, captions_, 1)
 
             captions_pred = captions_pred.cuda()
 
             captions_pred = captions_pred * captions_mask
-            print(captions_pred.shape)
-            print(captions_onehot.shape)
 
             p_pred = p_pred.cuda()
             p_real = p_real.cuda()
 
-            loss = 5 * self.criterion(p_pred, p_real) + 10 * self.criterion(captions_pred, captions_onehot)
-            print(self.criterion(captions_pred, captions_onehot))
+            loss = self.args.lambda_sentence * self.criterion(p_pred, p_real) \
+                   + self.args.lambda_word * self.criterion(captions_pred, captions_onehot)
 
             loss.backward()
             self.optimizer.step()
-            break
+            train_loss += loss.data[0]
 
         return train_loss
 
     def __epoch_val(self):
-        return 1
+        val_loss = 0
+        self.encoderCNN.eval()
+        self.wordRNN.eval()
+        self.sentenceRNN.eval()
+
+        for i, (images, _, captions, p_real) in enumerate(self.val_data_loader):
+            images = self.__to_var(images, volatile=True)
+            captions = self.__to_var(captions)
+            pooled_vectors = self.encoderCNN.forward(images)
+
+            sentence_states = None
+
+            p_pred = torch.zeros(p_real.shape)
+            captions_pred = torch.zeros((captions.shape[0],
+                                         captions.shape[1],
+                                         captions.shape[2],
+                                         len(self.vocab)))
+
+            for sentence_index in range(captions.shape[1]):
+                p, topic_vec, sentence_states = self.sentenceRNN.forward(pooled_vectors, sentence_states)
+                p_pred[:, sentence_index] = p.view(-1, )
+
+                for word_index in range(1, captions.shape[2]):
+                    words_pred = self.wordRNN.forward(topic_vec=topic_vec,
+                                                      captions=captions[:, sentence_index, :word_index])
+                    captions_pred[:, sentence_index, word_index, :] = words_pred
+            captions_mask = captions > 0
+            captions_mask = captions_mask.cuda().view(captions_mask.shape[0],
+                                                      captions_mask.shape[1],
+                                                      captions_mask.shape[2], 1).float()
+
+            captions_ = torch.unsqueeze(captions, 3)
+            captions_onehot = torch.FloatTensor(captions.shape[0],
+                                                captions.shape[1],
+                                                captions.shape[2],
+                                                len(self.vocab)).cuda().zero_()
+            captions_onehot.scatter_(3, captions_, 1)
+
+            captions_pred = captions_pred.cuda()
+
+            captions_pred = captions_pred * captions_mask
+
+            p_pred = p_pred.cuda()
+            p_real = p_real.cuda()
+
+            loss = self.args.lambda_sentence * self.criterion(p_pred, p_real) \
+                   + self.args.lambda_word * self.criterion(captions_pred, captions_onehot)
+
+            val_loss += loss.data[0]
+
+        return val_loss
 
     def __init_data_loader(self, data_json):
         data_loader = get_loader(image_dir=self.args.image_dir,
@@ -197,7 +249,7 @@ class Im2pGenerator(object):
             self.min_loss = loss
 
     def __init_criterion(self):
-        return nn.BCELoss()
+        return nn.BCELoss(size_average=False)
 
     def __init_optimizer(self):
         params = list(self.encoderCNN.parameters()) \
@@ -247,6 +299,10 @@ if __name__ == '__main__':
                         help='the size for pooling vector')
     parser.add_argument('--topic_dim', type=int, default=1024,
                         help='the size for topic vector')
+    parser.add_argument('--lambda_sentence', type=int, default=5,
+                        help='the cost lambda for sentence loss function')
+    parser.add_argument('--lambda_word', type=int, default=1,
+                        help='the cost lambda for word loss function')
 
     parser.add_argument('--epochs', type=int, default=1,
                         help='the num of epochs when training')
