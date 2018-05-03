@@ -74,6 +74,7 @@ class Im2pGenerator(object):
                     words_pred = self.wordRNN.forward(topic_vec=topic_vec,
                                                       captions=captions[:, sentence_index, :word_index])
                     captions_pred[:, sentence_index, word_index, :] = words_pred
+
             captions_mask = captions > 0
             captions_mask = captions_mask.cuda().view(captions_mask.shape[0],
                                                       captions_mask.shape[1],
