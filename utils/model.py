@@ -114,13 +114,12 @@ class WordRNN(nn.Module):
         """
         :param topic_vec: [batch_size, pooling_dim]
         :param captions: [batch_size, n_max]
-        :param lengths: [batch_size]
         :return:
         """
         embeddings = self.embed(captions)
         embeddings = torch.cat((topic_vec, embeddings), 1)
         hidden, _ = self.lstm(embeddings)
-        outputs = nn.Softmax()(self.linear(hidden))
+        outputs = nn.Softmax(dim=2)(self.linear(hidden))
         return outputs[:, -1]
 
     def sample(self, features, n_max, states=None):
