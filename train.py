@@ -80,7 +80,6 @@ class Im2pGenerator(object):
             loss.backward()
             self.optimizer.step()
             train_loss += loss.data[0]
-            print("{}:loss {}".format(i, loss))
 
         return train_loss
 
@@ -115,7 +114,6 @@ class Im2pGenerator(object):
                     word_loss += t_loss.sum()
             loss = self.args.lambda_sentence * sentence_loss + self.args.lambda_word * word_loss
             val_loss += loss.data[0]
-            print("{}:loss {}".format(i, loss))
 
         return val_loss
 
@@ -268,11 +266,11 @@ if __name__ == '__main__':
     parser.add_argument('--lambda_word', type=int, default=1,
                         help='the cost lambda for word loss function')
 
-    parser.add_argument('--epochs', type=int, default=50,
+    parser.add_argument('--epochs', type=int, default=1000,
                         help='the num of epochs when training')
-    parser.add_argument('--batch_size', type=int, default=2,
+    parser.add_argument('--batch_size', type=int, default=16,
                         help='the batch size for training')
-    parser.add_argument('--learning_rate', type=float, default=0.001,
+    parser.add_argument('--learning_rate', type=float, default=0.01,
                         help='the initial learning rate')
 
     args = parser.parse_args()

@@ -14,9 +14,10 @@ class DataSet(data.Dataset):
                  caption_json,
                  data_json,
                  vocabulary,
-                 transform=None):
+                 transform=None,
+                 s_max=6,
+                 n_max=50):
         """
-
         :param image_dir: the path of image folder.
         :param caption_json: total caption file.
         :param data_json: split data json
@@ -28,6 +29,8 @@ class DataSet(data.Dataset):
         self.data = JsonReader(data_json)
         self.vocabulary = vocabulary
         self.transform = transform
+        self.s_max = 6
+        self.n_max = 50
 
     def __getitem__(self, index):
         """
@@ -47,9 +50,11 @@ class DataSet(data.Dataset):
 
         target = list()
         word_num = 0
-        for sentence in paragraph.split('. '):
+        for i, sentence in enumerate(paragraph.split('. ')):
+            if i >= self.s_max:
+                break
             sentence = sentence.lower().replace('.', '').replace(',', '').split()
-            if len(sentence) == 0:
+            if len(sentence) == 0 or len(sentence) > self.n_max:
                 continue
             tokens = list()
             tokens.append(self.vocabulary('<start>'))
@@ -117,7 +122,7 @@ if __name__ == '__main__':
     vocab_path = '../data/vocab.pkl'
     image_dir = '../data/images'
     caption_json = '../data/captions.json'
-    data_json = '../data/train_split.json'
+    data_json = '../data/val_split.json'
     batch_size = 3
     resize = 256
     crop_size = 224
@@ -141,8 +146,4 @@ if __name__ == '__main__':
                              batch_size=batch_size,
                              shuffle=True)
     for i, (images, images_id, target, prob) in enumerate(data_loader):
-        print("image:{}".format(images.shape))
-        print("images id:{}".format(images_id))
-        print("captions:{}".format(target))
-        print("image id:{}".format(prob))
-        break
+        print(target.shape)

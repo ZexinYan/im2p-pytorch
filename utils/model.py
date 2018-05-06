@@ -122,9 +122,10 @@ class WordRNN(nn.Module):
         outputs = nn.Softmax(dim=2)(self.linear(hidden))
         return outputs[:, -1]
 
-    def sample(self, features, n_max, states=None):
-        sampled_ids = np.zeros((np.shape(features)[0], self.n_max))
-        inputs = features.unsqueeze(1)
+    def sample(self, features, n_max):
+        sampled_ids = np.zeros((np.shape(features)[0], n_max))
+        inputs = features
+        states = None
         for i in range(n_max):
             hiddens, states = self.lstm(inputs, states)
             outputs = self.linear(hiddens.squeeze(1))
@@ -147,9 +148,10 @@ if __name__ == '__main__':
     states = None
 
     for i in range(s_max):
-        p, topic, states = sentence_model.forward(region_features, states)
-        print(p)
-        print(topic)
-        print(states)
+        p, topic, states = sentence_model.sample(region_features, states)
+        samples_ids = word_model.sample(region_features, n_max)
+        p = (p > 0.5).squeeze(1)
+        samples_ids = samples_ids * p
+        print(samples_ids.shape)
         break
 

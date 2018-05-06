@@ -41,6 +41,11 @@ class Vocabulary(object):
             return self.word2idx['<unk>']
         return self.word2idx[word]
 
+    def __getitem__(self, item):
+        if item > len(self.id2word):
+            return '<unk>'
+        return self.id2word[item]
+
     def __len__(self):
         return len(self.word2idx)
 
@@ -57,7 +62,8 @@ def build_vocab(json_file, threshold):
     vocab = Vocabulary()
 
     for _, word in enumerate(words):
-        vocab.add_word(word)
+        if len(word) > 1:
+            vocab.add_word(word)
     return vocab
 
 
