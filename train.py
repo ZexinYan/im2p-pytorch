@@ -1,3 +1,7 @@
+import warnings
+
+warnings.filterwarnings("ignore")
+
 import argparse
 import os
 import pickle
@@ -6,13 +10,12 @@ import time
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
-from torch.nn.utils.rnn import pack_padded_sequence
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torchvision import transforms
 
 from utils.data_loader import get_loader, Vocabulary
 from utils.model import *
-# from utils.logger import Logger
+from utils.logger import Logger
 
 
 class Im2pGenerator(object):
@@ -33,18 +36,20 @@ class Im2pGenerator(object):
         self.optimizer = self.__init_optimizer()
         self.scheduler = self.__init_scheduler()
 
-        # self.logger = self.__init_logger()
+        self.logger = self.__init_logger()
 
     def train(self):
         for epoch in range(self.args.epochs):
             train_loss = self.__epoch_train()
-            val_loss = self.__epoch_val()
+            # val_loss = self.__epoch_val()
+            val_loss = 0
             self.scheduler.step(train_loss)
-            print("[{}] Epoch-{} - train loss:{} - val loss:{}".format(self.__get_now(),
-                                                                       epoch + 1,
-                                                                       train_loss,
-                                                                       val_loss))
-            self.__save_model(train_loss, self.args.saved_model_name)
+            print("[{}] Epoch-{} - train loss:{} - val loss:{} - lr:{}".format(self.__get_now(),
+                                                                               epoch + 1,
+                                                                               train_loss,
+                                                                               val_loss,
+                                                                               self.optimizer.param_groups[0]['lr']))
+            # self.__save_model(train_loss, self.args.saved_model_name)
             # self.__log(train_loss, val_loss, epoch + 1)
 
     def __epoch_train(self):
@@ -57,7 +62,6 @@ class Im2pGenerator(object):
             images = self.__to_var(images, volatile=True)
             captions = self.__to_var(captions)
             pooled_vectors = self.encoderCNN.forward(images)
-
             sentence_states = None
 
             sentence_loss = 0
@@ -65,18 +69,18 @@ class Im2pGenerator(object):
 
             for sentence_index in range(captions.shape[1]):
                 p, topic_vec, sentence_states = self.sentenceRNN.forward(pooled_vectors, sentence_states)
-                sentence_loss += self.criterion(p, self.__to_var(p_real[:, sentence_index])).sum()
+                p = p.squeeze(1)
+                sentence_loss += self.criterion(p, self.__to_var(p_real[:, sentence_index]).long()).sum()
 
                 for word_index in range(1, captions.shape[2] - 1):
                     words_pred = self.wordRNN.forward(topic_vec=topic_vec,
                                                       captions=captions[:, sentence_index, :word_index])
-                    words_real = torch.FloatTensor(captions.shape[0], len(self.vocab)).cuda().zero_()
-                    words_real.scatter_(1, torch.unsqueeze(captions[:, sentence_index, word_index], 1).data, 1)
-                    caption_mask = (captions[:, sentence_index, word_index] > 1).view(-1, 1).float() * torch.ones((1, len(self.vocab))).cuda()
-                    t_loss = self.criterion(words_pred, self.__to_var(words_real))
+                    caption_mask = (captions[:, sentence_index, word_index] > 1).view(-1,).float().cuda()
+                    t_loss = self.criterion(words_pred, self.__to_var(captions[:, sentence_index, word_index]))
                     t_loss = t_loss * caption_mask
                     word_loss += t_loss.sum()
-            loss = self.args.lambda_sentence * sentence_loss + self.args.lambda_word * word_loss
+
+            loss = self.args.lambda_word * word_loss
             loss.backward()
             self.optimizer.step()
             train_loss += loss.data[0]
@@ -107,8 +111,8 @@ class Im2pGenerator(object):
                     words_pred = self.wordRNN.forward(topic_vec=topic_vec,
                                                       captions=captions[:, sentence_index, :word_index])
                     words_real = torch.FloatTensor(captions.shape[0], len(self.vocab)).cuda().zero_()
-                    words_real.scatter_(1, torch.unsqueeze(captions[:, sentence_index, word_index], 1).data, 1)
-                    caption_mask = (captions[:, sentence_index, word_index] > 1).view(-1, 1).float() * torch.ones((1, len(self.vocab))).cuda()
+                    caption_mask = (captions[:, sentence_index, word_index] > 1).view(-1, 1).float() * torch.ones(
+                        (1, len(self.vocab))).cuda()
                     t_loss = self.criterion(words_pred, self.__to_var(words_real))
                     t_loss = t_loss * caption_mask
                     word_loss += t_loss.sum()
@@ -131,7 +135,7 @@ class Im2pGenerator(object):
         transform = transforms.Compose([
             transforms.Resize(self.args.resize),
             transforms.RandomCrop(self.args.crop_size),
-            transforms.RandomHorizontalFlip(),
+            # transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             transforms.Normalize((0.485, 0.456, 0.406),
                                  (0.229, 0.224, 0.225))])
@@ -171,18 +175,18 @@ class Im2pGenerator(object):
         if not os.path.exists(self.args.model_path):
             os.makedirs(self.args.model_path)
 
-    # def __log(self, train_loss, val_loss, epoch):
-    #     info = {
-    #         'train loss': train_loss,
-    #         'val loss': val_loss
-    #     }
-    #
-    #     for tag, value in info.items():
-    #         self.logger.scalar_summary(tag, value, epoch + 1)
-    #
-    # def __init_logger(self):
-    #     logger = Logger(os.path.join(self.args.log_dir, self.__get_now()))
-    #     return logger
+    def __log(self, train_loss, val_loss, epoch):
+        info = {
+            'train loss': train_loss,
+            'val loss': val_loss,
+        }
+
+        for tag, value in info.items():
+            self.logger.scalar_summary(tag, value, epoch + 1)
+
+    def __init_logger(self):
+        logger = Logger(os.path.join(self.args.log_dir, self.__get_now()))
+        return logger
 
     def __to_var(self, x, volatile=False):
         if self.args.cuda:
@@ -211,12 +215,10 @@ class Im2pGenerator(object):
             self.min_loss = loss
 
     def __init_criterion(self):
-        return nn.BCELoss(size_average=False, reduce=False)
+        return nn.CrossEntropyLoss(size_average=False, reduce=False)
 
     def __init_optimizer(self):
-        params = list(self.encoderCNN.parameters()) \
-                 + list(self.wordRNN.parameters()) \
-                 + list(self.sentenceRNN.parameters())
+        params = list(self.encoderCNN.parameters()) + list(self.sentenceRNN.parameters()) + list(self.wordRNN.parameters())
         return torch.optim.Adam(params=params, lr=self.args.learning_rate)
 
 
@@ -226,7 +228,7 @@ if __name__ == '__main__':
                         help='disables CUDA training')
     parser.add_argument('--model_path', type=str, default='./models/',
                         help='path for saving trained models')
-    parser.add_argument('--resize', type=int, default=256,
+    parser.add_argument('--resize', type=int, default=224,
                         help='size for resizing images')
     parser.add_argument('--pretrained', action='store_true', default=False,
                         help='not using pretrained model when training')
@@ -238,13 +240,13 @@ if __name__ == '__main__':
                         help='the path for images')
     parser.add_argument('--caption_json', type=str, default='./data/captions.json',
                         help='path for captions')
-    parser.add_argument('--train_images_json', type=str, default='./data/val_split.json',
+    parser.add_argument('--train_images_json', type=str, default='./data/test.json',
                         help='the train array')
     parser.add_argument('--val_images_json', type=str, default='./data/test_split.json',
                         help='the val array')
     parser.add_argument('--log_dir', type=str, default='./logs',
                         help='the path for tensorboard')
-    parser.add_argument('--saved_model_name', type=str, default='./val')
+    parser.add_argument('--saved_model_name', type=str, default='val')
 
     # Model parameters
     parser.add_argument('--P', type=int, default=1024,
@@ -268,14 +270,15 @@ if __name__ == '__main__':
 
     parser.add_argument('--epochs', type=int, default=1000,
                         help='the num of epochs when training')
-    parser.add_argument('--batch_size', type=int, default=16,
+    parser.add_argument('--batch_size', type=int, default=2,
                         help='the batch size for training')
-    parser.add_argument('--learning_rate', type=float, default=0.01,
+
+    parser.add_argument('--learning_rate', type=float, default=0.001,
                         help='the initial learning rate')
 
     args = parser.parse_args()
     args.cuda = not args.no_cuda and torch.cuda.is_available()
-    print(args)
+    # print(args)
 
     model = Im2pGenerator(args)
     model.train()

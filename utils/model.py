@@ -24,7 +24,7 @@ class EncoderCNN(nn.Module):
         features = self.resnet(images)
         features = Variable(features.data)
         features = features.view(features.size(0), -1)
-        features = self.bn(self.linear(features))
+        features = self.linear(features)
         return features
 
 
@@ -58,7 +58,7 @@ class SentenceRNN(nn.Module):
         self.topic_dim = topic_dim
 
         self.lstm = nn.LSTM(self.topic_dim, hidden_size=self.hidden_size, num_layers=self.lstm_layer, batch_first=True)
-        self.logistic = nn.Linear(self.hidden_size, 1)
+        self.logistic = nn.Linear(self.hidden_size, 2)
         self.activation = nn.Sigmoid()
         self.fc1 = nn.Linear(self.hidden_size, self.topic_dim)
         self.fc2 = nn.Linear(self.topic_dim, self.topic_dim)
@@ -119,7 +119,7 @@ class WordRNN(nn.Module):
         embeddings = self.embed(captions)
         embeddings = torch.cat((topic_vec, embeddings), 1)
         hidden, _ = self.lstm(embeddings)
-        outputs = nn.Softmax(dim=2)(self.linear(hidden))
+        outputs = self.linear(hidden)
         return outputs[:, -1]
 
     def sample(self, features, n_max):

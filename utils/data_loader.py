@@ -91,7 +91,7 @@ def collate_fn(data):
     for i, caption in enumerate(captions):
         for j, sentence in enumerate(caption):
             targets[i, j, :len(sentence)] = sentence[:]
-            prob[i][j] = len(sentence) > 0
+            prob[i, j] = 1
 
     targets = torch.Tensor(targets).long()
     prob = torch.Tensor(prob)
